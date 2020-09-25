@@ -1,14 +1,11 @@
 [CmdletBinding()]
 param(
-    [switch]$Silent=$false
+    [switch]$Silent=$false,
+    [switch]$List=$false
 )
 
 $wd = $PSScriptRoot
-
 . "$wd/Functions.ps1"
-
-Config-EnsureNameExists
-Config-EnsureEmailExists
 
 $chocoPrograms = @(
     ( ChocoProgram "choco-7zip"   "7zip"   "7zip - Set of archival tools" $true ),
@@ -16,19 +13,48 @@ $chocoPrograms = @(
     ( ChocoProgram "choco-vscode" "vscode" "VS Code - advanced text editor" $true )
 )
 
-foreach ($p in $chocoPrograms)
-{
-    #$isInstalled = Choco-ProgramIsInstalled $p.ChocoId
-    write-host ("{0} - {1}" -f $p.ChocoId, $p.Description)
-}
-
 $vsCodeExtensions = @(
-    ( VsCodeExt "vscodeext-ms-msql.mssql"     "ms-msql.mssql"     "MS SQL Server" $true ),
+    ( VsCodeExt "vscodeext-ms-msql.mssql"     "ms-msql.mssql"     "MS SQL Server" ),
     ( VsCodeExt "vscodeext-humao.rest-client" "humao.rest-client" "REST Client" )
 )
 
-foreach ($ext in $vsCodeExtensions)
+function List-ScriptInfo
 {
-    write-host ("{0} - {1}" -f $ext.ExtId, $ext.Description)
+    write-host "
+Programs that can be installed:
+"
+    foreach ($p in $chocoPrograms)
+    {
+        write-host ("- {0}" -f $p.Description)
+    }
+    
+    write-host "
+VSCode extensions that can be installed:
+"
+    foreach ($ext in $vsCodeExtensions)
+    {
+        write-host ("- {0}" -f $ext.Description)
+    }   
 }
 
+if($List) { List-ScriptInfo ; exit 0 }
+
+
+if(-not $Silent)
+{
+    Config-EnsureNameExists
+    Config-EnsureEmailExists
+
+    foreach ($p in $chocoPrograms)
+    {
+        Config-AskInstallChocoProgram $p
+    }
+
+    foreach ($ext in $vsCodeExtensions)
+    {
+        Config-AskInstallVSCodeExt $ext
+    }
+}
+
+# Config-SaveStepId "test-xxx"
+# Config-HasRunStep "test-xxx"

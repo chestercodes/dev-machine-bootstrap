@@ -194,4 +194,79 @@ function Config-EnsureEmailExists
     }
 }
 
+function Config-HasRunStep
+{
+    param($stepId, $filePath=$null)
+    $config = Config-Get $filePath
+    return ($config.StepsRun -contains $stepId)
+}
+
+function Config-SaveStepId
+{
+    param($stepId, $filePath=$null)
+    $config = Config-Get $filePath
+    $config.StepsRun += $stepId
+    Config-WriteOutConfig $config $filePath
+}
+
+function Config-AskInstallChocoProgram
+{
+    param($choco, $filePath=$null)
+    $config = Config-Get $filePath
+    
+    $installed = $config.ChocoProgramsToInstall -contains $choco.ChocoId
+    $ignore = $config.ChocoProgramsToIgnore -contains $choco.ChocoId
+    if( $installed -or $ignore )
+    { 
+        return
+    }
+
+    $desc = $choco.Description
+    while($true)
+    {
+        $yn = read-host -prompt "$desc -- install? (y/n)"
+        if($yn -eq "y")
+        {
+            $config.ChocoProgramsToInstall += $choco.ChocoId
+            break
+        }
+        if($yn -eq "n")
+        {
+            $config.ChocoProgramsToIgnore += $choco.ChocoId
+            break
+        }
+    }    
+    Config-WriteOutConfig $config $filePath
+}
+
+function Config-AskInstallVSCodeExt
+{
+    param($ext, $filePath=$null)
+    $config = Config-Get $filePath
+    
+    $installed = $config.VSCodeExtsToInstall -contains $ext.ExtId
+    $ignore = $config.VSCodeExtsToIgnore -contains $ext.ExtId
+    if( $installed -or $ignore )
+    { 
+        return
+    }
+
+    $desc = $ext.Description
+    while($true)
+    {
+        $yn = read-host -prompt "$desc -- install? (y/n)"
+        if($yn -eq "y")
+        {
+            $config.VSCodeExtsToInstall += $ext.ExtId
+            break
+        }
+        if($yn -eq "n")
+        {
+            $config.VSCodeExtsToIgnore += $ext.ExtId
+            break
+        }
+    }    
+    Config-WriteOutConfig $config $filePath
+}
+
 
