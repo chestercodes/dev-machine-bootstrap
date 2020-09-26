@@ -116,8 +116,14 @@ function RunStep
     Config-SaveStepId $stepId
 }
 
+$configureGit = {
+    $config = Config-Get
+    write-host ("git config --global user.name '{0}'" -f $config.Name)
+    write-host ("git config --global user.email {0}" -f $config.Email)
+}
+
 ##################
-#  Script starts #
+#  Script starts 
 ##################
 
 if($List) { List-ScriptInfo ; exit 0 }
@@ -133,12 +139,6 @@ if(-not $Silent)
 Install-ProgramsFromConfig
 
 Install-VSCodeExtensionsFromConfig
-
-$configureGit = {
-    $config = Config-Get
-    write-host ("git config --global user.name '{0}'" -f $config.Name)
-    write-host ("git config --global user.email {0}" -f $config.Email)
-}
 
 RunStep "step-configure-git" $configureGit
 
