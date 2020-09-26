@@ -4,13 +4,16 @@ param(
     [switch]$List=$false
 )
 
+$ErrorActionPreference = "Stop"
+
 $wd = $PSScriptRoot
 . "$wd/Functions.ps1"
 
 $chocoPrograms = @(
     ( ChocoProgram "choco-7zip"   "7zip"   "7zip - Set of archival tools" $true ),
     ( ChocoProgram "choco-curl"   "curl"   "curl - Windows implementation of cUrl" ),
-    ( ChocoProgram "choco-vscode" "vscode" "VS Code - advanced text editor" $true )
+    ( ChocoProgram "choco-vscode" "vscode" "VS Code - advanced text editor" $true ),
+    ( ChocoProgram "choco-wf-wsl" "Microsoft-Windows-Subsystem-Linux" "Windows Subsystem for Linux - TODO" $true "windowsfeatures" $true )
 )
 
 $vsCodeExtensions = @(
@@ -20,27 +23,20 @@ $vsCodeExtensions = @(
 
 function List-ScriptInfo
 {
-    write-host "
-Programs that can be installed:
-"
+    write-host "Programs that can be installed:`n"
     foreach ($p in $chocoPrograms)
     {
         write-host ("- {0}" -f $p.Description)
     }
     
-    write-host "
-VSCode extensions that can be installed:
-"
+    write-host "VSCode extensions that can be installed:`n"
     foreach ($ext in $vsCodeExtensions)
     {
         write-host ("- {0}" -f $ext.Description)
     }   
 }
 
-if($List) { List-ScriptInfo ; exit 0 }
-
-
-if(-not $Silent)
+function Generate-Config
 {
     Config-EnsureNameExists
     Config-EnsureEmailExists
@@ -56,5 +52,68 @@ if(-not $Silent)
     }
 }
 
-# Config-SaveStepId "test-xxx"
-# Config-HasRunStep "test-xxx"
+function Install-ProgramsFromConfig
+{
+    Config-ResetLastBootTimeIfDifferentToCurrent
+    
+    AbortUnlessChocoExists
+
+    foreach ($p in $chocoPrograms)
+    {
+        Choco-InstallProgramIfInConfig $p
+    }
+
+    if(Config-NeedsToReboot)
+    {
+        if($Silent)
+        {
+            write-host "Need to restart machine
+            Don't want to do this in silent mode in case it causes bad things"
+            Stop-Transcript
+            exit 0
+        } else
+        {
+            while($true)
+            {
+                $yn = read-host -prompt "Need to restart machine, do this now? (y/n)"
+                if($yn -eq "y")
+                {
+                    Stop-Transcript
+                    restart-computer
+                }
+                if($yn -eq "n")
+                {
+                    break
+                }
+            }
+        }
+    }
+}
+
+function Install-VSCodeExtensionsFromConfig
+{
+    foreach ($ext in $vsCodeExtensions)
+    {
+        Code-InstallExtIfInConfig $ext
+    }    
+}
+
+##################
+#  Script starts #
+##################
+
+if($List) { List-ScriptInfo ; exit 0 }
+
+# don't want to log calls to -List
+Start-Transcript -Path (Transcript-GetPath)
+
+if(-not $Silent)
+{
+    Generate-Config
+}
+
+Install-ProgramsFromConfig
+
+Install-VSCodeExtensionsFromConfig
+
+Stop-Transcript

@@ -6,14 +6,16 @@ function ChocoProgram
         [string]$chocoId,
         [string]$description,
         [bool]$required = $false,
-        [string]$testCommand = $null
+        $chocoSource = $null,
+        [bool]$restartRequired = $false
     )
     $p = @{
         StepId = $stepId
         ChocoId = $chocoId
         Description = $description
         Required = $required
-        TestCommand = $testCommand
+        ChocoSource = $chocoSource
+        RestartRequired = $restartRequired
     }
     $o = New-Object psobject -Property $p;
     return $o
@@ -51,9 +53,18 @@ function AbortUnlessProgramExists
     param($p)
     if(-not(ProgramExistsOnPath $p))
     {
-        write-error "$p is not on PATH, cannot continue"
+        write-error "$p is not on PATH, cannot continue. 
+        
+        Maybe try again in another shell window?
+        "
         exit 1
     }
+}
+
+function Get-LastBootTime
+{
+    $lastBootTime = (Get-WmiObject win32_operatingsystem | select @{LABEL='LastBootUpTime';EXPRESSION={$_.ConverttoDateTime($_.lastbootuptime)}}).LastBootUpTime.ToString("o")
+    return $lastBootTime
 }
 
 function AbortUnlessVSCodeExists
@@ -78,6 +89,19 @@ function Choco-ProgramIsInstalled
     return $true
 }
 
+function Choco-InstallProgram
+{
+    param($choco)
+    
+    if($choco.ChocoSource -ne $null)
+    {
+        Write-host ("choco install -y {0} --source {1}" -f $choco.ChocoId, $choco.ChocoSource)
+    } else
+    {
+        write-host ("choco install -y {0}" -f $choco.ChocoId)
+    }
+}
+
 function Code-GetInstalledExtensions
 {
     AbortUnlessVSCodeExists
@@ -88,7 +112,20 @@ function Code-InstallExtension
 {
     param($ext)
     AbortUnlessVSCodeExists
-    return code --list-extensions
+    write-host ("code --install-extension {0}" -f $ext.ExtId)
+}
+
+function Transcript-GetPath
+{
+    $wd = $PSScriptRoot
+    
+    $dataDir = "$wd/data/logs"
+    if(-not(Test-Path $dataDir))
+    {
+        mkdir $dataDir | out-null
+    }
+    $fileName = (Get-date).ToString("yyyy_MM_dd_hh_mm_ss_fff")
+    return "$dataDir/$fileName.log"
 }
 
 function Config-GetPath
@@ -130,6 +167,7 @@ function Config-WriteOutBlankConfig
         ChocoProgramsToIgnore = @()
         VSCodeExtsToInstall = @()
         VSCodeExtsToIgnore = @()
+        RestartRequiredIfEqualsTimeOrNull = $null
     }
     $blankObject = New-Object psobject -Property $p;
     Config-WriteOutConfig $blankObject $filePath
@@ -206,7 +244,7 @@ function Config-SaveStepId
     param($stepId, $filePath=$null)
     $config = Config-Get $filePath
     $config.StepsRun += $stepId
-    Config-WriteOutConfig $config $filePath
+    #Config-WriteOutConfig $config $filePath
 }
 
 function Config-AskInstallChocoProgram
@@ -216,8 +254,8 @@ function Config-AskInstallChocoProgram
     
     $installed = $config.ChocoProgramsToInstall -contains $choco.ChocoId
     $ignore = $config.ChocoProgramsToIgnore -contains $choco.ChocoId
-    if( $installed -or $ignore )
-    { 
+    if( $installed -or $ignore -or $choco.Required)
+    {
         return
     }
 
@@ -269,4 +307,70 @@ function Config-AskInstallVSCodeExt
     Config-WriteOutConfig $config $filePath
 }
 
+function Choco-InstallProgramIfInConfig
+{
+    param ($choco)
+    
+    if(Config-HasRunStep $choco.StepId) { return }
 
+    $config = Config-Get
+
+    $install = $config.ChocoProgramsToInstall -contains $choco.ChocoId
+    if($choco.Required -or $install)
+    {
+        Choco-InstallProgram $choco
+        
+        if($choco.RestartRequired)
+        {
+            $lastBootTime = Get-LastBootTime
+            $config.RestartRequiredIfEqualsTimeOrNull = $lastBootTime
+            Config-WriteOutConfig $config
+        }
+    }
+
+    Config-SaveStepId $choco.StepId
+}
+
+function Code-InstallExtIfInConfig
+{
+    param ($ext)
+    
+    if(Config-HasRunStep $ext.StepId) { return }
+
+    $config = Config-Get
+
+    $install = $config.VSCodeExtsToInstall -contains $ext.ExtId
+    if($install)
+    {
+        Code-InstallExtension $ext
+    }
+
+    Config-SaveStepId $ext.StepId
+}
+
+function Config-ResetLastBootTimeIfDifferentToCurrent
+{
+    $config = Config-Get
+    if([string]::IsNullOrEmpty($config.RestartRequiredIfEqualsTimeOrNull))
+    {
+        return
+    }
+    
+    $lastBootTime = Get-LastBootTime
+    if($lastBootTime -eq $config.RestartRequiredIfEqualsTimeOrNull)
+    {
+        # Are same, probably just run and not rebooted, leave as is so will offer to reboot.
+    } else 
+    {
+        # Are different, probably was run a while ago and not rebooted by script
+        $config.RestartRequiredIfEqualsTimeOrNull = $null
+        Config-WriteOutConfig $config
+    }
+}
+
+function Config-NeedsToReboot
+{
+    $config = Config-Get
+    $isNOE = [string]::IsNullOrEmpty($config.RestartRequiredIfEqualsTimeOrNull)
+    return (-not $isNOE)
+}
