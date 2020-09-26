@@ -117,13 +117,14 @@ function RunStep
 }
 
 $configureGit = {
+    AbortUnlessProgramExists "git"
     $config = Config-Get
     write-host ("git config --global user.name '{0}'" -f $config.Name)
     write-host ("git config --global user.email {0}" -f $config.Email)
 }
 
 ##################
-#  Script starts 
+#  Script start 
 ##################
 
 if($List) { List-ScriptInfo ; exit 0 }
