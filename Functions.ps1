@@ -167,7 +167,7 @@ function Config-WriteOutBlankConfig
         ChocoProgramsToIgnore = @()
         VSCodeExtsToInstall = @()
         VSCodeExtsToIgnore = @()
-        RestartRequiredIfEqualsTimeOrNull = $null
+        RestartRequiredIfEqualsTimeOrNull = ""
     }
     $blankObject = New-Object psobject -Property $p;
     Config-WriteOutConfig $blankObject $filePath
@@ -244,7 +244,7 @@ function Config-SaveStepId
     param($stepId, $filePath=$null)
     $config = Config-Get $filePath
     $config.StepsRun += $stepId
-    #Config-WriteOutConfig $config $filePath
+    Config-WriteOutConfig $config $filePath
 }
 
 function Config-AskInstallChocoProgram
@@ -312,6 +312,7 @@ function Choco-InstallProgramIfInConfig
     param ($choco)
     
     if(Config-HasRunStep $choco.StepId) { return }
+    write-verbose ("Choco program {0}" -f $choco.ChocoId)
 
     $config = Config-Get
 
@@ -322,6 +323,7 @@ function Choco-InstallProgramIfInConfig
         
         if($choco.RestartRequired)
         {
+            write-verbose "Restart required..."
             $lastBootTime = Get-LastBootTime
             $config.RestartRequiredIfEqualsTimeOrNull = $lastBootTime
             Config-WriteOutConfig $config
@@ -336,6 +338,7 @@ function Code-InstallExtIfInConfig
     param ($ext)
     
     if(Config-HasRunStep $ext.StepId) { return }
+    write-verbose ("VSCode ext {0}" -f $ext.ExtId)
 
     $config = Config-Get
 
@@ -353,17 +356,18 @@ function Config-ResetLastBootTimeIfDifferentToCurrent
     $config = Config-Get
     if([string]::IsNullOrEmpty($config.RestartRequiredIfEqualsTimeOrNull))
     {
+        write-verbose "Restart required is null."
         return
     }
     
     $lastBootTime = Get-LastBootTime
     if($lastBootTime -eq $config.RestartRequiredIfEqualsTimeOrNull)
     {
-        # Are same, probably just run and not rebooted, leave as is so will offer to reboot.
+        write-verbose "Probably just run and not rebooted, leave as is so will offer to reboot."
     } else 
     {
-        # Are different, probably was run a while ago and not rebooted by script
-        $config.RestartRequiredIfEqualsTimeOrNull = $null
+        write-verbose "Are different, probably was run a while ago and not rebooted by script"
+        $config.RestartRequiredIfEqualsTimeOrNull = ""
         Config-WriteOutConfig $config
     }
 }

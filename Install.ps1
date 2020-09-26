@@ -54,6 +54,7 @@ function Generate-Config
 
 function Install-ProgramsFromConfig
 {
+    write-verbose "Install programs from config"
     Config-ResetLastBootTimeIfDifferentToCurrent
     
     AbortUnlessChocoExists
@@ -92,10 +93,27 @@ function Install-ProgramsFromConfig
 
 function Install-VSCodeExtensionsFromConfig
 {
+    write-verbose "Install code exts from config"
+    
     foreach ($ext in $vsCodeExtensions)
     {
         Code-InstallExtIfInConfig $ext
     }    
+}
+
+function RunStep
+{
+    param ($stepId, $action)
+    
+    if(Config-HasRunStep $stepId)
+    {
+        return
+    }
+
+    write-verbose "Running '$stepId'"
+    $action.Invoke()
+
+    Config-SaveStepId $stepId
 }
 
 ##################
@@ -115,5 +133,13 @@ if(-not $Silent)
 Install-ProgramsFromConfig
 
 Install-VSCodeExtensionsFromConfig
+
+$configureGit = {
+    $config = Config-Get
+    write-host ("git config --global user.name '{0}'" -f $config.Name)
+    write-host ("git config --global user.email {0}" -f $config.Email)
+}
+
+RunStep "step-configure-git" $configureGit
 
 Stop-Transcript
