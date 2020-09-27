@@ -143,7 +143,8 @@ $configureGit = {
 #  Script start 
 ##################
 
-$env:DEV_MACHINE_BOOTSTRAP_TEST_MODE = "something"
+### uncomment for a test mode which logs out the StartProcess calls
+#$env:DEV_MACHINE_BOOTSTRAP_TEST_MODE = "something"
 
 if($List) { List-ScriptInfo ; exit 0 }
 
