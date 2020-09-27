@@ -38,12 +38,13 @@ Then adding "steps" in the form of powershell code blocks which are run with the
 ``` ps
 # custom code saved as a script block as a powershell variable
 $customStepOne = {
-    Write-host "This is a custom step to b
+    Write-host "This is a custom step to be run."
+    This could setup the machine to any internal systems or other configuration"
 }
 
 # invocation of custom step with step Id of "step-custom-one"
 RunStep "step-custom-one" $customStepOne
 ```
 
-Examples of this are also seen with the $ensureChocoIsInstalled and $configureGit variables.
+Examples of this are also seen with the `$ensureChocoIsInstalled` and `$configureGit` variables.
 
