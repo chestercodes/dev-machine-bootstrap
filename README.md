@@ -12,13 +12,6 @@ It aims to be:
 - debuggable, write out the session to log files on each invocation
 
 
-## To use
-
-Clone repository and run:
-
-`./Install.ps1`
-
-
 ## Switches
 
 The script is most likely to be used without any switches. But it has a few other tricks up it's sleeve.
@@ -35,10 +28,10 @@ This can be done by changing the `$chocoPrograms` and `$vsCodeExtensions` variab
 
 Then adding "steps" in the form of powershell code blocks which are run with the `RunStep` function. 
 
-``` ps
+``` powershell
 # custom code saved as a script block as a powershell variable
 $customStepOne = {
-    Write-host "This is a custom step to be run."
+    Write-host "This is a custom step to be run.
     This could setup the machine to any internal systems or other configuration"
 }
 
@@ -48,3 +41,15 @@ RunStep "step-custom-one" $customStepOne
 
 Examples of this are also seen with the `$ensureChocoIsInstalled` and `$configureGit` variables.
 
+## To use
+
+Clone repository, open a powershell shell as an administrator and run:
+
+`./Install.ps1`
+
+
+## Reason/rational
+
+Installing programs is annoying, anything to automate it is good. As much as having a page in a wiki is better than nothing, it's not much better...
+
+The idea of this being config driven is that it could potentially become part of an onboarding process. The new starter could be given a list of programs (with the `-list` argument) and they could chose the ones that they want. The script could then be used to send them a laptop that is ready to go from the start.
