@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$Silent=$false,
-    [switch]$List=$false
+    [switch]$List=$false,
+    [switch]$GenerateConfig=$false
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,8 @@ $wd = $PSScriptRoot
 $chocoPrograms = @(
     ( ChocoProgram "choco-7zip"   "7zip"   "7zip - Set of archival tools" $true ),
     ( ChocoProgram "choco-curl"   "curl"   "curl - Windows implementation of cUrl" ),
+    ( ChocoProgram "choco-git"    "git"    "git - distributed source controll" $true ),
+    ( ChocoProgram "choco-nodejs" "nodejs" "NodeJS - Javascript runtime" $true ),
     ( ChocoProgram "choco-vscode" "vscode" "VS Code - advanced text editor" $true ),
     ( ChocoProgram "choco-wf-wsl" "Microsoft-Windows-Subsystem-Linux" "Windows Subsystem for Linux - TODO" $true "windowsfeatures" $true )
 )
@@ -57,8 +60,6 @@ function Install-ProgramsFromConfig
     write-verbose "Install programs from config"
     Config-ResetLastBootTimeIfDifferentToCurrent
     
-    AbortUnlessChocoExists
-
     foreach ($p in $chocoPrograms)
     {
         Choco-InstallProgramIfInConfig $p
@@ -116,16 +117,32 @@ function RunStep
     Config-SaveStepId $stepId
 }
 
+# Steps
+
+$ensureChocoIsInstalled = {
+    if(-not(test-path $chocoExe))
+    {
+        write-host "Installing chocolatey"
+        Set-ExecutionPolicy Bypass -Scope Process -Force; `
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
+            iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+    } else {
+        Write-Verbose "Chocolatey is already installed"
+    }
+}
+
 $configureGit = {
-    AbortUnlessProgramExists "git"
     $config = Config-Get
-    write-host ("git config --global user.name '{0}'" -f $config.Name)
-    write-host ("git config --global user.email {0}" -f $config.Email)
+    $gitExe = "C:\Program Files\Git\cmd\git.exe"
+    StartProcess $gitExe @("config", "--global", "user.name", ("'{0}'" -f $config.Name))
+    StartProcess $gitExe @("config", "--global", "user.email", $config.Email)
 }
 
 ##################
 #  Script start 
 ##################
+
+$env:DEV_MACHINE_BOOTSTRAP_TEST_MODE = "something"
 
 if($List) { List-ScriptInfo ; exit 0 }
 
@@ -135,7 +152,19 @@ Start-Transcript -Path (Transcript-GetPath)
 if(-not $Silent)
 {
     Generate-Config
+    
+    if($GenerateConfig)
+    {
+        $configPath = Config-GetPath
+        write-host "
+    Config file created at '$configPath'
+"
+        Stop-Transcript
+        exit 0
+    }
 }
+
+RunStep "step-ensure-choco-installed" $ensureChocoIsInstalled
 
 Install-ProgramsFromConfig
 

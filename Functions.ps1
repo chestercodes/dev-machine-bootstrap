@@ -1,3 +1,6 @@
+$chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
+$codeExe = "C:\Program Files\Microsoft VS Code\bin\code.cmd"
+
 # ChocoProgram, VsCodeExt all need a StepId property that is unique and immutable
 function ChocoProgram
 {
@@ -37,28 +40,45 @@ function VsCodeExt
     return $o
 }
 
-function ProgramExistsOnPath
+function StartProcess
 {
-    param($p)
-    $res = where.exe $p 
-    if($res -eq $null)
+    param ($exePath, $callArgs, $runInTestMode = $false)
+    
+    if((-not $runInTestMode) -and ($env:DEV_MACHINE_BOOTSTRAP_TEST_MODE -ne $null))
     {
-        return $false
+        write-host "$exePath $callArgs"
+        return
     }
-    return $true
+
+    write-verbose "Calling $exePath with $callArgs"
+    Start-Process -NoNewWindow -Wait -FilePath $exePath -ArgumentList $callArgs
 }
 
-function AbortUnlessProgramExists
+function StartProcessAndCaptureOutput
 {
-    param($p)
-    if(-not(ProgramExistsOnPath $p))
+    param ($exePath, $callArgs, $runInTestMode = $false)
+    
+    if((-not $runInTestMode) -and ($env:DEV_MACHINE_BOOTSTRAP_TEST_MODE -ne $null))
     {
-        write-error "$p is not on PATH, cannot continue. 
-        
-        Maybe try again in another shell window?
-        "
-        exit 1
+        write-host "$exePath $callArgs"
+        return
     }
+
+    write-verbose "Calling $exePath with $callArgs"
+    
+    $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+    $pinfo.FileName = $exePath
+    #$pinfo.RedirectStandardError = $true
+    $pinfo.RedirectStandardOutput = $true
+    $pinfo.UseShellExecute = $false
+    $pinfo.Arguments = $callArgs
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo = $pinfo
+    $p.Start() | Out-Null
+    $p.WaitForExit()
+    $stdout = $p.StandardOutput.ReadToEnd()
+    #$stderr = $p.StandardError.ReadToEnd()
+    return $stdout
 }
 
 function Get-LastBootTime
@@ -67,26 +87,22 @@ function Get-LastBootTime
     return $lastBootTime
 }
 
-function AbortUnlessVSCodeExists
-{
-    AbortUnlessProgramExists "code"
-}
-
-function AbortUnlessChocoExists
-{
-    AbortUnlessProgramExists "choco"
-}
-
 function Choco-ProgramIsInstalled
 {
     param($chocoId)
     write-verbose "Checking for $chocoId"
-    $i = iex "choco list --local-only $chocoId"
+    $i = (StartProcessAndCaptureOutput $chocoExe @("list","--local-only","$chocoId") $true)
+    write-verbose "$i"
     if($i -match "0 packages")
     {
         return $false
     }
-    return $true
+    if($i -match "[^\w]$chocoId [0-9]+")
+    {
+        write-verbose "Found $chocoId"
+        return $true
+    }
+    return $false
 }
 
 function Choco-InstallProgram
@@ -95,24 +111,24 @@ function Choco-InstallProgram
     
     if($choco.ChocoSource -ne $null)
     {
-        Write-host ("choco install -y {0} --source {1}" -f $choco.ChocoId, $choco.ChocoSource)
-    } else
-    {
-        write-host ("choco install -y {0}" -f $choco.ChocoId)
+        $callArgs = @("install", "-y", $choco.ChocoId, "--source", $choco.ChocoSource)
+    } else {
+        $callArgs = @("install", "-y", $choco.ChocoId)
     }
+    StartProcess $chocoExe $callArgs
 }
 
 function Code-GetInstalledExtensions
 {
-    AbortUnlessVSCodeExists
-    return code --list-extensions
+    $results = StartProcessAndCaptureOutput $codeExe @("--list-extensions") $true
+    
+    return ($results.Split())
 }
 
 function Code-InstallExtension
 {
     param($ext)
-    AbortUnlessVSCodeExists
-    write-host ("code --install-extension {0}" -f $ext.ExtId)
+    StartProcess $codeExe @("--install-extension", $ext.ExtId)
 }
 
 function Transcript-GetPath
@@ -319,14 +335,18 @@ function Choco-InstallProgramIfInConfig
     $install = $config.ChocoProgramsToInstall -contains $choco.ChocoId
     if($choco.Required -or $install)
     {
-        Choco-InstallProgram $choco
-        
-        if($choco.RestartRequired)
+        $isAlreadyInstalled = Choco-ProgramIsInstalled $choco.ChocoId
+        if(-not $isAlreadyInstalled)
         {
-            write-verbose "Restart required..."
-            $lastBootTime = Get-LastBootTime
-            $config.RestartRequiredIfEqualsTimeOrNull = $lastBootTime
-            Config-WriteOutConfig $config
+            Choco-InstallProgram $choco
+        
+            if($choco.RestartRequired)
+            {
+                write-verbose "Restart required..."
+                $lastBootTime = Get-LastBootTime
+                $config.RestartRequiredIfEqualsTimeOrNull = $lastBootTime
+                Config-WriteOutConfig $config
+            }
         }
     }
 
@@ -345,7 +365,16 @@ function Code-InstallExtIfInConfig
     $install = $config.VSCodeExtsToInstall -contains $ext.ExtId
     if($install)
     {
-        Code-InstallExtension $ext
+        $installedExts = Code-GetInstalledExtensions
+        $isAlreadyInstalled = $installedExts -contains $ext.ExtId
+        if($isAlreadyInstalled)
+        {
+            write-verbose ("{0} is already installed" -f $ext.ExtId)
+        } else
+        {
+            write-verbose ("{0} is not installed" -f $ext.ExtId)
+            Code-InstallExtension $ext
+        }
     }
 
     Config-SaveStepId $ext.StepId
