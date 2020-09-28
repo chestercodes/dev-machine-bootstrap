@@ -12,17 +12,20 @@ $wd = $PSScriptRoot
 . "$wd/Functions.ps1"
 
 $chocoPrograms = @(
-    ( ChocoProgram "choco-7zip"   "7zip"   "7zip - Set of archival tools" $true ),
-    ( ChocoProgram "choco-curl"   "curl"   "curl - Windows implementation of cUrl" ),
-    ( ChocoProgram "choco-git"    "git"    "git - distributed source controll" $true ),
-    ( ChocoProgram "choco-nodejs" "nodejs" "NodeJS - Javascript runtime" $true ),
-    ( ChocoProgram "choco-vscode" "vscode" "VS Code - advanced text editor" $true ),
-    ( ChocoProgram "choco-wf-wsl" "Microsoft-Windows-Subsystem-Linux" "Windows Subsystem for Linux - TODO" $true "windowsfeatures" $true )
+    ( ChocoProgram "7zip"   "7zip - Set of archival tools" @() ),
+    ( ChocoProgram "curl"   "curl - Windows implementation of cUrl" ),
+    ( ChocoProgram "git"    "git - distributed source controll" @() $true ),
+    ( ChocoProgram "nodejs" "NodeJS - Javascript runtime" @("front-end") ),
+    ( ChocoProgram "jre8"   "jre - " @("back-end") ),
+    ( ChocoProgram "ssms"   "SSMS - " @("dba") ),
+    ( ChocoProgram "vscode" "VS Code - advanced text editor" @() $true ),
+    ( ChocoProgram "Microsoft-Windows-Subsystem-Linux" "Windows Subsystem for Linux - TODO" @("back-end") $true "windowsfeatures" $true )
 )
 
 $vsCodeExtensions = @(
-    ( VsCodeExt "vscodeext-ms-msql.mssql"     "ms-msql.mssql"     "MS SQL Server" ),
-    ( VsCodeExt "vscodeext-humao.rest-client" "humao.rest-client" "REST Client" )
+    ( VsCodeExt "ms-msql.mssql"          "MS SQL Server" @("dba", "back-end") ),
+    ( VsCodeExt "humao.rest-client"      "REST Client"   @("back-end") ),
+    ( VsCodeExt "esbenp.prettier-vscode" "Prettier"      @("front-end") )
 )
 
 function List-ScriptInfo
@@ -40,19 +43,75 @@ function List-ScriptInfo
     }   
 }
 
+function GetUniqueRoles
+{
+    $roles = @("all")
+    
+    foreach ($p in $chocoPrograms)
+    {
+        foreach ($r in $p.SpecificToRoles)
+        {
+            if(-not($roles -contains $r))
+            {
+                $roles += $r
+            }
+        }
+    }
+    foreach ($e in $vsCodeExtensions)
+    {
+        foreach ($r in $e.SpecificToRoles)
+        {
+            if(-not($roles -contains $r))
+            {
+                $roles += $r
+            }
+        }
+    }
+    return $roles
+}
+
+function ShowProgramForRole
+{
+    param ($software, $role)
+    $roleIsAll = $role -eq "all"
+    $isEmpty = $software.SpecificToRoles.Length -eq 0
+    $isSpecificToRole = $software.SpecificToRoles -contains $role
+    return ($roleIsAll -or $isEmpty -or $isSpecificToRole)
+}
+
 function Generate-Config
 {
     Config-EnsureNameExists
     Config-EnsureEmailExists
 
+    $uniqueRoles = GetUniqueRoles
+
+    while ($true)
+    {
+        $resp = read-host -prompt "What software are you interested in? ($uniqueRoles)"
+        if($uniqueRoles -contains $resp)
+        {
+            $role = $resp
+            break
+        }    
+    }
+
+    write-host "Showing $role software"
+
     foreach ($p in $chocoPrograms)
     {
-        Config-AskInstallChocoProgram $p
+        if(ShowProgramForRole $p $role)
+        {
+            Config-AskInstallChocoProgram $p
+        }
     }
 
     foreach ($ext in $vsCodeExtensions)
     {
-        Config-AskInstallVSCodeExt $ext
+        if(ShowProgramForRole $ext $role)
+        {
+            Config-AskInstallVSCodeExt $ext
+        }
     }
 }
 

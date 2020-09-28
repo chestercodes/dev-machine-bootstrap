@@ -5,17 +5,24 @@ $codeExe = "C:\Program Files\Microsoft VS Code\bin\code.cmd"
 function ChocoProgram
 {
     param(
-        [string]$stepId,
         [string]$chocoId,
         [string]$description,
+        [string[]]$specificToRoles = @(),
         [bool]$required = $false,
         $chocoSource = $null,
         [bool]$restartRequired = $false
     )
+    if($chocoSource -eq $null)
+    {
+        $stepId = "choco-$chocoId"
+    } else {
+        $stepId = "choco-$chocoSource-$chocoId"
+    }
     $p = @{
         StepId = $stepId
         ChocoId = $chocoId
         Description = $description
+        SpecificToRoles = $specificToRoles
         Required = $required
         ChocoSource = $chocoSource
         RestartRequired = $restartRequired
@@ -27,14 +34,16 @@ function ChocoProgram
 function VsCodeExt
 {
     param(
-        [string]$stepId,
         [string]$extId,
-        [string]$description
+        [string]$description,
+        [string[]]$specificToRoles = @()
     )
+    $stepId = "vscodeext-$extId"
     $p = @{
         StepId = $stepId
         ExtId = $extId
         Description = $description
+        SpecificToRoles = $specificToRoles
     }
     $o = New-Object psobject -Property $p;
     return $o
