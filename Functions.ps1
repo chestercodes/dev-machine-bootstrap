@@ -1,7 +1,7 @@
 $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
 $codeExe = "C:\Program Files\Microsoft VS Code\bin\code.cmd"
 
-# ChocoProgram, VsCodeExt all need a StepId property that is unique and immutable
+# ChocoProgram, VsCodeExt need a StepId property that is unique
 function ChocoProgram
 {
     param(
@@ -9,8 +9,7 @@ function ChocoProgram
         [string]$description,
         [string[]]$specificToRoles = @(),
         [bool]$required = $false,
-        $chocoSource = $null,
-        [bool]$restartRequired = $false
+        $chocoSource = $null
     )
     if($chocoSource -eq $null)
     {
@@ -25,7 +24,6 @@ function ChocoProgram
         SpecificToRoles = $specificToRoles
         Required = $required
         ChocoSource = $chocoSource
-        RestartRequired = $restartRequired
     }
     $o = New-Object psobject -Property $p;
     return $o
@@ -53,24 +51,91 @@ function StartProcess
 {
     param ($exePath, $callArgs, $runInTestMode = $false)
     
-    if((-not $runInTestMode) -and ($env:DEV_MACHINE_BOOTSTRAP_TEST_MODE -ne $null))
+    if((-not $runInTestMode) -and (IsInTestMode))
     {
-        write-host "$exePath $callArgs"
+        start-sleep -milliseconds 400
+        write-host "$testModePrefix $exePath $callArgs"
         return
     }
 
     write-verbose "Calling $exePath with $callArgs"
-    Start-Process -NoNewWindow -Wait -FilePath $exePath -ArgumentList $callArgs
+    $p = Start-Process -NoNewWindow -PassThru -Wait -FilePath $exePath -ArgumentList $callArgs
+    $exitCode = $p.ExitCode
+
+    if($exitCode -ne 0)
+    {
+        write-host "LASTEXITCODE is not 0. It is $exitCode"
+        
+        if(IsInSilentMode)
+        {
+            write-host "Is in silent mode, exiting as can't take user input."
+            exit 1
+        }
+        
+        $isChoco = $exePath -eq $chocoExe
+        if($isChoco -and ($exitCode -eq 3010))
+        {
+            # chocolatey has a couple of non-zero exit codes which indicate that the install was successful
+            # 3010 means that all is ok, but a restart is needed for the changes to take effect.
+
+            while($true)
+            {
+                $yn = read-host -prompt "Last exit code was indicates that a restart is needed.`n   Restart machine? (y/n)"
+                if($yn -eq "y")
+                {
+                    write-host "restarting computer"
+                    Stop-Transcript
+                    restart-computer
+                }
+                if($yn -eq "n")
+                {
+                    break
+                }
+            }
+        }
+
+        while($true)
+        {
+            $yn = read-host -prompt "Last exit code was non-zero. Proceed? (y/n)"
+            if($yn -eq "y")
+            {
+                break
+            }
+            if($yn -eq "n")
+            {
+                exit 1
+            }
+        }
+    }
+}
+
+function IsInSilentMode
+{
+    return ($env:DEV_MACHINE_BOOTSTRAP_SILENT_MODE -ne $null)
+}
+
+$testModePrefix = "TESTMODE:"
+
+function IsInTestMode
+{
+    return ($env:DEV_MACHINE_BOOTSTRAP_TEST_MODE -ne $null)
 }
 
 function StartProcessAndCaptureOutput
 {
     param ($exePath, $callArgs, $runInTestMode = $false)
     
-    if((-not $runInTestMode) -and ($env:DEV_MACHINE_BOOTSTRAP_TEST_MODE -ne $null))
+    if((-not $runInTestMode) -and (IsInTestMode))
     {
-        write-host "$exePath $callArgs"
+        write-host "$testModePrefix $exePath $callArgs"
         return
+    }
+
+    if(IsInTestMode)
+    {
+        # This is hit for calls like code --list-extensions 
+        # calls that needs some return value to decide where to go next
+        return ""
     }
 
     write-verbose "Calling $exePath with $callArgs"
@@ -90,10 +155,52 @@ function StartProcessAndCaptureOutput
     return $stdout
 }
 
-function Get-LastBootTime
+function IsRunningInContainer
 {
-    $lastBootTime = (Get-WmiObject win32_operatingsystem | select @{LABEL='LastBootUpTime';EXPRESSION={$_.ConverttoDateTime($_.lastbootuptime)}}).LastBootUpTime.ToString("o")
-    return $lastBootTime
+    [string]$userName = $env:USERNAME
+    return $userName.StartsWith("Container")
+}
+
+function Get-UsernameFromEnv
+{
+    [string]$userName = $env:USERNAME
+    if([string]::IsNullOrEmpty($userName))
+    {
+        # this really shouldn't happen, windows should always 
+        # have something as the USERNAME
+        return "josephine.bloggs"
+    }
+    
+    if(IsRunningInContainer)
+    {
+        return "chester.burbidge"
+    }
+
+    return $userName
+}
+
+function CapitaliseWord
+{
+    param ([string]$word)
+    $firstLetter = $word.Substring(0,1).ToUpper()
+    $rest = $word.Substring(1).ToLower()
+    return "$firstLetter$rest"
+}
+
+function Name-GuessFromEnv
+{
+    $userName = Get-UsernameFromEnv
+    $name = ($userName.Split('.') | % { CapitaliseWord $_ }) -join " "
+    write-verbose "Name guessed to be $name"
+    return $name
+}
+
+function Email-GuessFromEnv
+{
+    $userName = Get-UsernameFromEnv
+    $email = "$username@your-company.com"
+    write-verbose "Email guessed to be $email"
+    return $email
 }
 
 function Choco-ProgramIsInstalled
@@ -106,6 +213,10 @@ function Choco-ProgramIsInstalled
     {
         return $false
     }
+    
+    # this is a bit extra, basically want the regex to match
+    # the package name and then a number, but don't want there to 
+    # be a word char before the name. so want 'git' to not match poshgit 1.2.3
     if($i -match "[^\w]$chocoId [0-9]+")
     {
         write-verbose "Found $chocoId"
@@ -192,7 +303,6 @@ function Config-WriteOutBlankConfig
         ChocoProgramsToIgnore = @()
         VSCodeExtsToInstall = @()
         VSCodeExtsToIgnore = @()
-        RestartRequiredIfEqualsTimeOrNull = ""
     }
     $blankObject = New-Object psobject -Property $p;
     Config-WriteOutConfig $blankObject $filePath
@@ -204,6 +314,7 @@ function Config-EnsureExists
     $configPath = Config-GetPath $filePath
     if(-not(Test-Path $configPath))
     {
+        write-verbose "Config file doesn't exist at $configPath"
         Config-WriteOutBlankConfig $filePath
     }
 }
@@ -218,16 +329,24 @@ function Config-Get
 
 function Get-Input
 {
-    param($msg)
+    param($msg, $guessValue = $null, $guessMsg = $null)
     
     while($true)
     {
-        $theValue = read-host -prompt $msg
-        $yn = read-host -prompt "I heard '$theValue' is this ok? (y/n)"
+        if($guessValue -eq $null)
+        {
+            $theValue = read-host -prompt $msg
+            $yn = read-host -prompt "I heard '$theValue' is this ok? (y/n)"
+        } else {
+            $theValue = $guessValue
+            $yn = read-host -prompt $guessMsg
+        }
+        
         if($yn -eq "y")
         {
             return $theValue
         }
+        $guessValue = $null
     }
 }
 
@@ -238,7 +357,8 @@ function Config-EnsureNameExists
     if([string]::IsNullOrEmpty($config.Name))
     {
         write-verbose "Name doesn't exist"
-        $name = Get-Input "Please enter name"
+        $nameFromEnv = Name-GuessFromEnv
+        $name = Get-Input "Please enter name" $nameFromEnv ("I've guessed your name to be '$nameFromEnv'. Is this ok? (y/n)")
         $config.Name = $name
         Config-WriteOutConfig $config $filePath
     }
@@ -251,7 +371,8 @@ function Config-EnsureEmailExists
     if([string]::IsNullOrEmpty($config.Email))
     {
         write-verbose "Email doesn't exist"
-        $email = Get-Input "Please enter email"
+        $emailFromEnv = Email-GuessFromEnv
+        $email = Get-Input "Please enter email" $emailFromEnv ("I've guessed your email to be '$emailFromEnv'. Is this ok? (y/n)")
         $config.Email = $email
         Config-WriteOutConfig $config $filePath
     }
@@ -336,7 +457,11 @@ function Choco-InstallProgramIfInConfig
 {
     param ($choco)
     
-    if(Config-HasRunStep $choco.StepId) { return }
+    if(Config-HasRunStep $choco.StepId)
+    {
+        write-verbose ("Has already run step {0}" -f $choco.StepId)
+        return
+    }
     write-verbose ("Choco program {0}" -f $choco.ChocoId)
 
     $config = Config-Get
@@ -348,14 +473,6 @@ function Choco-InstallProgramIfInConfig
         if(-not $isAlreadyInstalled)
         {
             Choco-InstallProgram $choco
-        
-            if($choco.RestartRequired)
-            {
-                write-verbose "Restart required..."
-                $lastBootTime = Get-LastBootTime
-                $config.RestartRequiredIfEqualsTimeOrNull = $lastBootTime
-                Config-WriteOutConfig $config
-            }
         }
     }
 
@@ -366,7 +483,11 @@ function Code-InstallExtIfInConfig
 {
     param ($ext)
     
-    if(Config-HasRunStep $ext.StepId) { return }
+    if(Config-HasRunStep $ext.StepId) 
+    {
+        write-verbose ("Has already run step {0}" -f $ext.StepId)
+        return
+    }
     write-verbose ("VSCode ext {0}" -f $ext.ExtId)
 
     $config = Config-Get
@@ -389,30 +510,191 @@ function Code-InstallExtIfInConfig
     Config-SaveStepId $ext.StepId
 }
 
-function Config-ResetLastBootTimeIfDifferentToCurrent
+function RunStep
 {
-    $config = Config-Get
-    if([string]::IsNullOrEmpty($config.RestartRequiredIfEqualsTimeOrNull))
+    param ($stepId, $action)
+    
+    if(Config-HasRunStep $stepId)
     {
-        write-verbose "Restart required is null."
+        write-verbose ("Has already run step {0}" -f $stepId)
         return
     }
-    
-    $lastBootTime = Get-LastBootTime
-    if($lastBootTime -eq $config.RestartRequiredIfEqualsTimeOrNull)
+
+    write-verbose "Running '$stepId'"
+    $action.Invoke()
+
+    Config-SaveStepId $stepId
+}
+
+function TellUserAboutStep
+{
+    param($msg)
+    $bar = "===================================================================="
+    write-host "`n$bar`n$msg`n$bar`n"
+    if(IsInSilentMode){ return }
+    Read-Host -prompt "Hit enter to proceed"
+}
+
+function WindowsFeature-InstallOrEnable
+{
+    param ($feature)
+    Write-Host "Installing/Enabling $feature"
+    $callArgs = @("install", "-y", $feature, "--source", "windowsfeatures")
+    StartProcess $chocoExe $callArgs
+}
+
+function Set-FolderPermissions
+{
+    param ($folderPath, $permUser, $requiredPermissions)
+    $Acl = Get-Acl $folderPath
+    $Ar = New-Object System.Security.AccessControl.FileSystemAccessRule($permUser, $requiredPermissions, "ContainerInherit,ObjectInherit", "None", "Allow")
+    if(-not(IsInTestMode))
     {
-        write-verbose "Probably just run and not rebooted, leave as is so will offer to reboot."
-    } else 
-    {
-        write-verbose "Are different, probably was run a while ago and not rebooted by script"
-        $config.RestartRequiredIfEqualsTimeOrNull = ""
-        Config-WriteOutConfig $config
+        $Acl.SetAccessRule($Ar)
+        Set-Acl $folderPath $Acl
     }
 }
 
-function Config-NeedsToReboot
+function Run
 {
-    $config = Config-Get
-    $isNOE = [string]::IsNullOrEmpty($config.RestartRequiredIfEqualsTimeOrNull)
-    return (-not $isNOE)
+    param ($cmd)
+    if(IsInTestMode){
+        write-host "$testModePrefix $cmd"
+    } else {
+        Invoke-expression -command $cmd
+    }
+}
+
+#####################################################
+#
+#   Everything below this assumes that
+#   the following variables exist:
+#    - $chocoPrograms
+#    - $vsCodeExtensions
+#
+#####################################################
+
+$allRole = "all"
+
+function GetUniqueRoles
+{
+    $roles = @($allRole)
+    
+    foreach ($p in $chocoPrograms)
+    {
+        foreach ($r in $p.SpecificToRoles)
+        {
+            if(-not($roles -contains $r))
+            {
+                $roles += $r
+            }
+        }
+    }
+    foreach ($e in $vsCodeExtensions)
+    {
+        foreach ($r in $e.SpecificToRoles)
+        {
+            if(-not($roles -contains $r))
+            {
+                $roles += $r
+            }
+        }
+    }
+    return $roles
+}
+
+function ShowProgramForRole
+{
+    param ($software, $role)
+    $roleIsAll = $role -eq $allRole
+    $isEmpty = $software.SpecificToRoles.Length -eq 0
+    $isSpecificToRole = $software.SpecificToRoles -contains $role
+    return ($roleIsAll -or $isEmpty -or $isSpecificToRole)
+}
+
+function FormatSpecificToRoles {
+    param ($specificToRoles)
+    if($specificToRoles.Length -eq 0)
+    {
+        return ""
+    }
+    $specificToRoles = $specificToRoles -join "|"
+    return "<$specificToRoles>"
+}
+
+function List-ScriptInfo
+{
+    write-host "`nPrograms that can be installed:`n"
+    foreach ($p in $chocoPrograms)
+    {
+        $description = "{0} {1}" -f $p.Description, (FormatSpecificToRoles $p.SpecificToRoles)
+        write-host ("- {0}" -f $description)
+    }
+    
+    write-host "`nVSCode extensions that can be installed:`n"
+
+    $orderedByDesc = $vsCodeExtensions | Sort-object -property Description
+    foreach ($ext in $orderedByDesc)
+    {
+        $description = "{0} {1}" -f $ext.Description, (FormatSpecificToRoles $ext.SpecificToRoles)
+        write-host ("- {0}" -f $description)
+    }   
+}
+
+function Generate-Config
+{
+    Config-EnsureNameExists
+    Config-EnsureEmailExists
+
+    $uniqueRoles = GetUniqueRoles
+
+    while ($true)
+    {
+        $resp = read-host -prompt "What software are you interested in? ($uniqueRoles)"
+        if($uniqueRoles -contains $resp)
+        {
+            $role = $resp
+            break
+        }    
+    }
+
+    write-host "Showing $role software"
+
+    write-host "`nPrograms that can be installed:`n"
+    foreach ($p in $chocoPrograms)
+    {
+        if(ShowProgramForRole $p $role)
+        {
+            Config-AskInstallChocoProgram $p
+        }
+    }
+
+    write-host "`nVS Code extensions that can be installed:`n"
+    $orderedByDesc = $vsCodeExtensions | Sort-object -property Description
+    foreach ($ext in $orderedByDesc)
+    {
+        if(ShowProgramForRole $ext $role)
+        {
+            Config-AskInstallVSCodeExt $ext
+        }
+    }
+}
+
+function Install-ProgramsFromConfig
+{
+    Write-Host "Install programs from config"
+    foreach ($p in $chocoPrograms)
+    {
+        Choco-InstallProgramIfInConfig $p
+    }
+}
+
+function Install-VSCodeExtensionsFromConfig
+{
+    Write-Host "Install code extensions from config"
+    
+    foreach ($ext in $vsCodeExtensions)
+    {
+        Code-InstallExtIfInConfig $ext
+    }    
 }
